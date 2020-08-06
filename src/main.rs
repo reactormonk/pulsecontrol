@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern crate libpulse_binding as pulse;
 extern crate druid as druid;
+extern crate libpulse_binding as pulse;
 
 use druid::piet::Color;
 use druid::widget::{Align, Container, Label, Padding, Split};
