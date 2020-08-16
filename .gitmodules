@@ -1,0 +1,3 @@
+[submodule "pulse-binding-rust"]
+	path = pulse-binding-rust
+	url = git@github.com:reactormonk/pulse-binding-rust.git

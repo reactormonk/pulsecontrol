@@ -4,11 +4,13 @@ name: Continuous integration
 
 jobs:
   check:
-    container: reactormonk/ubuntu-gtk-dev:4
+    container: reactormonk/ubuntu-gtk-dev:5
     name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: true
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -19,11 +21,13 @@ jobs:
           command: check
 
   test:
-    container: reactormonk/ubuntu-gtk-dev:4
+    container: reactormonk/ubuntu-gtk-dev:5
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: true
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -34,11 +38,13 @@ jobs:
           command: test
 
   fmt:
-    container: reactormonk/ubuntu-gtk-dev:4
+    container: reactormonk/ubuntu-gtk-dev:5
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: true
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -51,11 +57,13 @@ jobs:
           args: --all -- --check
 
   clippy:
-    container: reactormonk/ubuntu-gtk-dev:4
+    container: reactormonk/ubuntu-gtk-dev:5
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: true
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
