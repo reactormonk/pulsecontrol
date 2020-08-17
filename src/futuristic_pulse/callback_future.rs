@@ -1,5 +1,5 @@
 use futures::channel::mpsc::Receiver;
-use futures::{channel::mpsc::channel, Stream};
+use futures::{channel::mpsc::channel};
 use libpulse_binding::{
     callbacks::ListResult,
     context::introspect::{SinkInfo, SinkPortInfo, SourceInfo, SourcePortInfo},
@@ -71,7 +71,7 @@ impl<R> Future for CallbackFuture<R> {
     }
 }
 
-trait MakeOwned {
+pub trait MakeOwned {
     type Owned;
     fn make_owned(&self) -> Self::Owned;
 }
@@ -194,13 +194,15 @@ pub fn callback_stream_sink_info() -> (
 ) {
     let (mut sender, recv) = channel(1024); // TODO channel size?
     let cb = {
-        move |c: ListResult<&SinkInfo<'_>>| match c {
+        move |c: ListResult<&SinkInfo<'_>>| {
+        match c {
             ListResult::Item(it) => match sender.try_send(it.make_owned()) {
                 Ok(_) => (),
-                Err(err) => (), // TODO
+                Err(err) => eprintln!("Failed to send message {:?}", err),
             },
-            ListResult::End => (),
+            ListResult::End => sender.disconnect(),
             ListResult::Error => (), // TODO
+        }
         }
     };
     (cb, recv)
@@ -215,9 +217,9 @@ pub fn callback_stream_source_info() -> (
         move |c: ListResult<&SourceInfo<'_>>| match c {
             ListResult::Item(it) => match sender.try_send(it.make_owned()) {
                 Ok(_) => (),
-                Err(err) => (), // TODO
+                Err(err) => eprintln!("Failed to send message {:?}", err),
             },
-            ListResult::End => (),
+            ListResult::End => sender.disconnect(),
             ListResult::Error => (), // TODO
         }
     };
@@ -235,9 +237,9 @@ pub fn callback_list_stream<T: MakeOwned >() -> (impl FnMut(ListResult<&T>), Rec
         move |c: ListResult<&T>| match c {
             ListResult::Item(it) => match sender.try_send(it.make_owned()) {
                 Ok(_) => (),
-                Err(err) => (), // TODO
+                Err(err) => eprintln!("Failed to send message {:?}", err),
             },
-            ListResult::End => (),
+            ListResult::End => sender.disconnect(),
             ListResult::Error => (), // TODO
         }
     };
