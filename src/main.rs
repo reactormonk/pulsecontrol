@@ -124,13 +124,18 @@ async fn main() {
         }
     );
 
-    let pulse_stream = recv.boxed_local().flat_map({|raw|
+    let init_sink_stream = introspector.stream_info_list().map(move |info:SinkInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSink(info)}).boxed();
+    let init_source_stream = introspector.stream_info_list().map(move |info:SourceInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSource(info)}).boxed();
+    let init_sink_input_stream = introspector.stream_info_list().map(move |info:SinkInputInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSinkInput(info)}).boxed();
+    let init_source_output_stream = introspector.stream_info_list().map(move |info:SourceOutputInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSourceOutput(info)}).boxed();
+
+    let live_stream = recv.boxed_local().flat_map({|raw|
         match (raw.facility, raw.operation) {
             (_, Operation::Removed) => once(async move {MsgDel {id: raw.index}}).boxed(),
             (Facility::Sink, _) => introspector.stream_info_by_index(raw.index).map(move |info| MsgAdd {id: raw.index, msg: PulseAddMessage::MsgSink(info)}).boxed(),
             (Facility::Source, _) => introspector.stream_info_by_index(raw.index).map(move |info| MsgAdd {id: raw.index, msg: PulseAddMessage::MsgSource(info)}).boxed(),
-            (Facility::SinkInput, _) => empty().boxed(),
-            (Facility::SourceOutput, _) => empty().boxed(),
+            (Facility::SinkInput, _) => introspector.stream_info_by_index(raw.index).map(move |info| MsgAdd {id: raw.index, msg: PulseAddMessage::MsgSinkInput(info)}).boxed(),
+            (Facility::SourceOutput, _) => introspector.stream_info_by_index(raw.index).map(move |info| MsgAdd {id: raw.index, msg: PulseAddMessage::MsgSourceOutput(info)}).boxed(),
             (Facility::Module, _) => empty().boxed(),
             (Facility::Client, _) => empty().boxed(),
             (Facility::SampleCache, _) => empty().boxed(),
@@ -139,9 +144,11 @@ async fn main() {
         }
     });
 
+    let pulse_stream = init_sink_stream.chain(init_source_stream).chain(init_sink_input_stream).chain(init_source_output_stream).chain(live_stream);
+
     mainloop.borrow_mut().unlock();
 
-    pulse_stream.for_each({|pm| async move { eprintln!("Got Message: {:?}", pm)}}).await;
+    pulse_stream.for_each(|pm| async move { eprintln!("Got Message: {:?}", pm)}).await;
 
     loop {}
 

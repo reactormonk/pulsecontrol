@@ -2,74 +2,10 @@ use futures::channel::mpsc::Receiver;
 use futures::{channel::mpsc::channel};
 use libpulse_binding::{
     callbacks::ListResult,
-    context::introspect::{SinkInfo, SinkPortInfo, SourceInfo, SourcePortInfo},
+    context::introspect::{SinkInfo, SinkPortInfo, SourceInfo, SourcePortInfo, SinkInputInfo, SourceOutputInfo},
 };
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
 use std::{borrow::Cow, boxed::Box};
 
-pub struct WakerSet {
-    waker: Option<Waker>,
-}
-
-impl WakerSet {
-    pub fn new() -> Self {
-        Self { waker: None }
-    }
-
-    pub fn register(&mut self, w: &Waker) {
-        match self.waker {
-            Some(ref w) if (w.will_wake(w)) => {}
-            Some(_) => panic!("Waker overflow"),
-            None => self.waker = Some(w.clone()),
-        }
-    }
-
-    pub fn wake(&mut self) {
-        self.waker.take().map(|w| w.wake());
-    }
-}
-
-enum CallbackFutureState<R> {
-    Running(WakerSet),
-    Done(Option<R>),
-}
-
-pub struct CallbackFuture<R> {
-    state: Arc<Mutex<CallbackFutureState<R>>>,
-}
-
-impl<R: 'static> CallbackFuture<R> {
-    pub fn new() -> (Self, impl FnMut(R) + 'static) {
-        let state = Arc::new(Mutex::new(CallbackFutureState::Running(WakerSet::new())));
-
-        let fut = Self {
-            state: state.clone(),
-        };
-
-        let callback = move |r| {
-            *state.lock().unwrap() = CallbackFutureState::Done(Some(r));
-        };
-
-        (fut, callback)
-    }
-}
-
-impl<R> Future for CallbackFuture<R> {
-    type Output = R;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &mut *self.state.lock().unwrap() {
-            CallbackFutureState::Running(w) => {
-                w.register(cx.waker());
-                Poll::Pending
-            }
-            CallbackFutureState::Done(r) => Poll::Ready(r.take().unwrap()),
-        }
-    }
-}
 
 pub trait MakeOwned {
     type Owned;
@@ -188,6 +124,59 @@ fn make_owned(&self) -> Self::Owned {
 }
 }
 
+impl<'a> MakeOwned for SourceOutputInfo<'a> {
+    type Owned = SourceOutputInfo<'static>;
+    fn make_owned(&self) -> Self::Owned {
+        SourceOutputInfo {
+            index: self.index.clone(),
+            name: self.name.as_ref().map(|s| Cow::Owned(s.to_string())),
+            owner_module: self.owner_module.clone(),
+            client: self.client.clone(),
+            source: self.source.clone(),
+            sample_spec: self.sample_spec.clone(),
+            channel_map: self.channel_map.clone(),
+            buffer_usec: self.buffer_usec.clone(),
+            source_usec: self.source_usec.clone(),
+            resample_method: self.resample_method.as_ref().map(|s| Cow::Owned(s.to_string())),
+            driver: self.driver.as_ref().map(|s| Cow::Owned(s.to_string())),
+            proplist: self.proplist.clone(),
+            corked: self.corked.clone(),
+            volume: self.volume.clone(),
+            mute: self.mute.clone(),
+            has_volume: self.has_volume.clone(),
+            volume_writable: self.volume_writable.clone(),
+            format: self.format.clone(),
+        }
+    }
+}
+
+impl<'a> MakeOwned for SinkInputInfo<'a> {
+    type Owned = SinkInputInfo<'static>;
+    fn make_owned(&self) -> Self::Owned {
+        SinkInputInfo {
+            index: self.index.clone(),
+            name: self.name.as_ref().map(|s| Cow::Owned(s.to_string())),
+            owner_module: self.owner_module.clone(),
+            client: self.client.clone(),
+            sink: self.sink.clone(),
+            sample_spec: self.sample_spec.clone(),
+            channel_map: self.channel_map.clone(),
+            volume: self.volume.clone(),
+            buffer_usec: self.buffer_usec.clone(),
+            sink_usec: self.sink_usec.clone(),
+            resample_method: self.resample_method.as_ref().map(|s| Cow::Owned(s.to_string())),
+            driver: self.driver.as_ref().map(|s| Cow::Owned(s.to_string())),
+            mute: self.mute.clone(),
+            proplist: self.proplist.clone(),
+            corked: self.corked.clone(),
+            has_volume: self.has_volume.clone(),
+            volume_writable: self.volume_writable.clone(),
+            format: self.format.clone(),
+        }
+    }
+}
+
+
 pub fn callback_stream_sink_info() -> (
     impl FnMut(ListResult<&SinkInfo<'_>>),
     Receiver<SinkInfo<'static>>,
@@ -201,7 +190,7 @@ pub fn callback_stream_sink_info() -> (
                 Err(err) => eprintln!("Failed to send message {:?}", err),
             },
             ListResult::End => sender.disconnect(),
-            ListResult::Error => (), // TODO
+            ListResult::Error => { eprintln!("Got an error on the C callback."); sender.disconnect()}, // TODO
         }
         }
     };
@@ -220,40 +209,59 @@ pub fn callback_stream_source_info() -> (
                 Err(err) => eprintln!("Failed to send message {:?}", err),
             },
             ListResult::End => sender.disconnect(),
-            ListResult::Error => (), // TODO
+            ListResult::Error => { eprintln!("Got an error on the C callback."); sender.disconnect()}, // TODO
         }
     };
     (cb, recv)
 }
 
-// pub fn foo() -> (
-//     impl FnMut(ListResult<&SourceInfo<'_>>),
-//     Receiver<SourceInfo<'static>>,
-// ) { callback_list_stream() }
-
-pub fn callback_list_stream<T: MakeOwned >() -> (impl FnMut(ListResult<&T>), Receiver<<T as MakeOwned>::Owned>) {
+pub fn callback_stream_sink_input_info() -> (
+    impl FnMut(ListResult<&SinkInputInfo<'_>>),
+    Receiver<SinkInputInfo<'static>>,
+) {
     let (mut sender, recv) = channel(1024); // TODO channel size?
     let cb = {
-        move |c: ListResult<&T>| match c {
+        move |c: ListResult<&SinkInputInfo<'_>>| match c {
             ListResult::Item(it) => match sender.try_send(it.make_owned()) {
                 Ok(_) => (),
                 Err(err) => eprintln!("Failed to send message {:?}", err),
             },
             ListResult::End => sender.disconnect(),
-            ListResult::Error => (), // TODO
+            ListResult::Error => { eprintln!("Got an error on the C callback."); sender.disconnect()}, // TODO
         }
     };
     (cb, recv)
 }
 
-async fn test() {
-    let (mut fut, mut callback) = CallbackFuture::<i32>::new();
-
-    let fut = Pin::new(&mut fut);
-
-    // on one thread
-    let _res = fut.await; // will block until callback is called
-
-    // on other thread, or from C code
-    callback(123);
+pub fn callback_stream_source_output_info() -> (
+    impl FnMut(ListResult<&SourceOutputInfo<'_>>),
+    Receiver<SourceOutputInfo<'static>>,
+) {
+    let (mut sender, recv) = channel(1024); // TODO channel size?
+    let cb = {
+        move |c: ListResult<&SourceOutputInfo<'_>>| match c {
+            ListResult::Item(it) => match sender.try_send(it.make_owned()) {
+                Ok(_) => (),
+                Err(err) => eprintln!("Failed to send message {:?}", err),
+            },
+            ListResult::End => sender.disconnect(),
+            ListResult::Error => { eprintln!("Got an error on the C callback."); sender.disconnect()}, // TODO
+        }
+    };
+    (cb, recv)
 }
+
+// pub fn callback_list_stream<T: MakeOwned >() -> (impl FnMut(ListResult<&T>), Receiver<<T as MakeOwned>::Owned>) {
+//     let (mut sender, recv) = channel(1024); // TODO channel size?
+//     let cb = {
+//         move |c: ListResult<&T>| match c {
+//             ListResult::Item(it) => match sender.try_send(it.make_owned()) {
+//                 Ok(_) => (),
+//                 Err(err) => eprintln!("Failed to send message {:?}", err),
+//             },
+//             ListResult::End => sender.disconnect(),
+//             ListResult::Error => (), // TODO
+//         }
+//     };
+//     (cb, recv)
+// }
