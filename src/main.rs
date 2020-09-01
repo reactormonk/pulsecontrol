@@ -14,6 +14,12 @@
 
 extern crate libpulse_binding as pulse;
 
+use futures::stream::iter;
+use tokio::{future, spawn};
+use std::future::Future;
+use druid::Selector;
+use druid::PlatformError;
+use futures::Stream;
 use futures::stream::once;
 use futures::channel::mpsc::Sender;
 use futures::channel::mpsc::Receiver;
@@ -30,15 +36,47 @@ use pulse::context::{introspect::{SourceOutputInfo, SinkInfo, SinkInputInfo}, su
 use futures::channel::mpsc::channel;
 use futuristic_pulse::*;
 use futures::stream::{empty, StreamExt};
+use druid::{AppLauncher, WindowDesc, Widget};
+use druid::{ExtEventSink, widget::Label};
 
 use PulseMessage::*;
 
 
 mod futuristic_pulse;
 
+const PULSE_CHANGES: Selector<PulseMessage> = Selector::new("pulsecontrol.pulse-changes");
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), PlatformError> {
+
+    // let launcher =  AppLauncher::with_window(WindowDesc::new(build_ui));
+    // let event_sink = launcher.get_external_handle();
+    // let mut pulse_stream = init_pulse();
+    init_pulse().await;
+
+    // pulse_stream.for_each(|pm| async move { eprintln!("Got message: {:?}", pm)}).await;
+
+    // spawn(async move {
+    //     eprintln!("Spawned!");
+    //     while let Some(pm) = pulse_stream.next().await {
+    //         eprintln!("Got Message: {:?}", pm);
+    //         match event_sink.submit_command(PULSE_CHANGES, pm, None) {
+    //             Err(err) => eprintln!("Error: {:?}", err),
+    //             Ok(()) => ()
+    //         };
+    //     }
+    // });
+
+    // launcher.launch(())?;
+    Ok(())
+}
+
+fn build_ui() -> impl Widget<()> {
+    Label::new("Hello world")
+}
+
+async fn init_pulse<'a>() {
+// fn init_pulse<'a>() -> impl Stream<Item=PulseMessage<'a>> {
     let spec = pulse::sample::Spec {
         format: pulse::sample::SAMPLE_S16NE,
         channels: 2,
@@ -88,10 +126,9 @@ async fn main() {
             pulse::context::State::Ready => { break; },
             pulse::context::State::Failed |
             pulse::context::State::Terminated => {
-                eprintln!("Context state failed/terminated, quitting...");
                 mainloop.borrow_mut().unlock();
                 mainloop.borrow_mut().stop();
-                return;
+                panic!("Context state failed/terminated, quitting...");
             },
             _ => { mainloop.borrow_mut().wait(); },
         }
@@ -129,7 +166,7 @@ async fn main() {
     let init_sink_input_stream = introspector.stream_info_list().map(move |info:SinkInputInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSinkInput(info)}).boxed();
     let init_source_output_stream = introspector.stream_info_list().map(move |info:SourceOutputInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSourceOutput(info)}).boxed();
 
-    let live_stream = recv.boxed_local().flat_map({|raw|
+    let live_stream = recv.boxed().flat_map({ move |raw|
         match (raw.facility, raw.operation) {
             (_, Operation::Removed) => once(async move {MsgDel {id: raw.index}}).boxed(),
             (Facility::Sink, _) => introspector.stream_info_by_index(raw.index).map(move |info| MsgAdd {id: raw.index, msg: PulseAddMessage::MsgSink(info)}).boxed(),
@@ -148,9 +185,9 @@ async fn main() {
 
     mainloop.borrow_mut().unlock();
 
-    pulse_stream.for_each(|pm| async move { eprintln!("Got Message: {:?}", pm)}).await;
+    // pulse_stream
 
-    loop {}
+    pulse_stream.for_each(|pm| async move { eprintln!("Got Message: {:?}", pm)}).await;
 
 }
 
@@ -160,6 +197,9 @@ struct RawPulseMessage {
     operation: Operation,
     index: u32
 }
+
+unsafe impl Send for RawPulseMessage {}
+unsafe impl Sync for RawPulseMessage {}
 
 #[derive(Clone, Debug)]
 enum PulseMessage<'a> {
