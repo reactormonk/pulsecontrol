@@ -51,10 +51,10 @@ async fn main() -> Result<(), PlatformError> {
 
     // let launcher =  AppLauncher::with_window(WindowDesc::new(build_ui));
     // let event_sink = launcher.get_external_handle();
-    // let mut pulse_stream = init_pulse();
-    init_pulse().await;
+    let mut pulse_stream = init_pulse();
+    // init_pulse().await;
 
-    // pulse_stream.for_each(|pm| async move { eprintln!("Got message: {:?}", pm)}).await;
+    pulse_stream.for_each(|pm| async move { eprintln!("Got message: {:?}", pm)}).await;
 
     // spawn(async move {
     //     eprintln!("Spawned!");
@@ -75,8 +75,8 @@ fn build_ui() -> impl Widget<()> {
     Label::new("Hello world")
 }
 
-async fn init_pulse<'a>() {
-// fn init_pulse<'a>() -> impl Stream<Item=PulseMessage<'a>> {
+// async fn init_pulse<'a>() {
+fn init_pulse<'a>() -> impl Stream<Item=PulseMessage<'a>> {
     let spec = pulse::sample::Spec {
         format: pulse::sample::SAMPLE_S16NE,
         channels: 2,
@@ -185,9 +185,9 @@ async fn init_pulse<'a>() {
 
     mainloop.borrow_mut().unlock();
 
-    // pulse_stream
+    pulse_stream
 
-    pulse_stream.for_each(|pm| async move { eprintln!("Got Message: {:?}", pm)}).await;
+    // pulse_stream.for_each(|pm| async move { eprintln!("Got Message: {:?}", pm)}).await;
 
 }
 
