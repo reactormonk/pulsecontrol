@@ -27,7 +27,7 @@ use libpulse_binding::context::introspect::SourceInfo;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::ops::Deref;
-use pulse::mainloop::threaded::Mainloop;
+use pulse::mainloop::standard::{IterateResult, Mainloop};
 use pulse::context::Context;
 use pulse::proplist::Proplist;
 // use pulse::mainloop::api::Mainloop as MainloopTrait; //Needs to be in scope
@@ -49,25 +49,27 @@ const PULSE_CHANGES: Selector<PulseMessage> = Selector::new("pulsecontrol.pulse-
 #[tokio::main]
 async fn main() -> Result<(), PlatformError> {
 
-    // let launcher =  AppLauncher::with_window(WindowDesc::new(build_ui));
-    // let event_sink = launcher.get_external_handle();
-    let mut pulse_stream = init_pulse();
+    let launcher =  AppLauncher::with_window(WindowDesc::new(build_ui));
+    let event_sink = launcher.get_external_handle();
     // init_pulse().await;
 
-    pulse_stream.for_each(|pm| async move { eprintln!("Got message: {:?}", pm)}).await;
+    // pulse_stream.for_each(|pm| async move { eprintln!("Got message: {:?}", pm)}).await;
 
-    // spawn(async move {
-    //     eprintln!("Spawned!");
-    //     while let Some(pm) = pulse_stream.next().await {
-    //         eprintln!("Got Message: {:?}", pm);
-    //         match event_sink.submit_command(PULSE_CHANGES, pm, None) {
-    //             Err(err) => eprintln!("Error: {:?}", err),
-    //             Ok(()) => ()
-    //         };
-    //     }
-    // });
+    let stream = std::thread::spawn(move || {
+        eprintln!("Spawned!");
+        let mut pulse_stream = init_pulse();
+        pulse_stream
+    });
 
-    // launcher.launch(())?;
+        // while let Some(pm) = pulse_stream.next().await {
+        //     eprintln!("Got Message: {:?}", pm);
+        //     match event_sink.submit_command(PULSE_CHANGES, pm, None) {
+        //         Err(err) => eprintln!("Error: {:?}", err),
+        //         Ok(()) => ()
+        //     };
+        // }
+
+    launcher.launch(())?;
     Ok(())
 }
 
@@ -97,43 +99,27 @@ fn init_pulse<'a>() -> impl Stream<Item=PulseMessage<'a>> {
         &proplist
         ).expect("Failed to create new context")));
 
-    // Context state change callback
-    {
-        let ml_ref = Rc::clone(&mainloop);
-        let context_ref = Rc::clone(&context);
-        context.borrow_mut().set_state_callback(Some(Box::new(move || {
-            let state = unsafe { (*context_ref.as_ptr()).get_state() };
-            match state {
-                pulse::context::State::Ready |
-                pulse::context::State::Failed |
-                pulse::context::State::Terminated => {
-                    unsafe { (*ml_ref.as_ptr()).signal(false); }
-                },
-                _ => {},
-            }
-        })));
-    }
-
     context.borrow_mut().connect(None, pulse::context::flags::NOFLAGS, None)
         .expect("Failed to connect context");
 
-    mainloop.borrow_mut().lock();
-    mainloop.borrow_mut().start().expect("Failed to start mainloop");
-
     // Wait for context to be ready
     loop {
+        match mainloop.borrow_mut().iterate(false) {
+            IterateResult::Quit(_) |
+            IterateResult::Err(_) => {
+                panic!("Iterate state was not success, quitting...");
+            },
+            IterateResult::Success(_) => {},
+        }
         match context.borrow().get_state() {
             pulse::context::State::Ready => { break; },
             pulse::context::State::Failed |
             pulse::context::State::Terminated => {
-                mainloop.borrow_mut().unlock();
-                mainloop.borrow_mut().stop();
                 panic!("Context state failed/terminated, quitting...");
             },
-            _ => { mainloop.borrow_mut().wait(); },
+            _ => {},
         }
     }
-    context.borrow_mut().set_state_callback(None);
 
     let interest = subscription_masks::ALL;
 
@@ -166,7 +152,8 @@ fn init_pulse<'a>() -> impl Stream<Item=PulseMessage<'a>> {
     let init_sink_input_stream = introspector.stream_info_list().map(move |info:SinkInputInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSinkInput(info)}).boxed();
     let init_source_output_stream = introspector.stream_info_list().map(move |info:SourceOutputInfo| MsgAdd {id: info.index, msg: PulseAddMessage::MsgSourceOutput(info)}).boxed();
 
-    let live_stream = recv.boxed().flat_map({ move |raw|
+    let live_stream = recv.flat_map({ move |raw| {
+        let _ = &mainloop; // keeping the mainloop alive
         match (raw.facility, raw.operation) {
             (_, Operation::Removed) => once(async move {MsgDel {id: raw.index}}).boxed(),
             (Facility::Sink, _) => introspector.stream_info_by_index(raw.index).map(move |info| MsgAdd {id: raw.index, msg: PulseAddMessage::MsgSink(info)}).boxed(),
@@ -179,11 +166,9 @@ fn init_pulse<'a>() -> impl Stream<Item=PulseMessage<'a>> {
             (Facility::Server, _) => empty().boxed(),
             (Facility::Card, _) => empty().boxed(),
         }
-    });
+    }});
 
     let pulse_stream = init_sink_stream.chain(init_source_stream).chain(init_sink_input_stream).chain(init_source_output_stream).chain(live_stream);
-
-    mainloop.borrow_mut().unlock();
 
     pulse_stream
 

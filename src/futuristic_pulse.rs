@@ -5,6 +5,7 @@ use self::callback_future::{callback_stream_sink_info, callback_stream_source_in
 use self::callback_future::{callback_stream_sink_input_info, callback_stream_source_output_info};
 use pulse::context::introspect::*;
 
+pub mod to_static;
 pub mod callback_future;
 
 // TODO different types for different ids
