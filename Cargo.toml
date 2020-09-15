@@ -9,9 +9,12 @@ edition = "2018"
 [dependencies]
 libpulse-binding = "2.16.1"
 callback-future = "0.1.0"
-druid = { git = "https://github.com/linebender/druid.git" }
+druid = { git = "https://github.com/linebender/druid.git", features = ["im"] }
 futures = "0.3.5"
 tokio = { version = "0.2.22", features = ["full"] }
+im = "15.0.0"
+# libpulse-futures = "0.1.0"
 
 [patch.crates-io]
 libpulse-binding = { path = "pulse-binding-rust/pulse-binding" }
+# libpulse-futures = { path = "libpulse-futures" }

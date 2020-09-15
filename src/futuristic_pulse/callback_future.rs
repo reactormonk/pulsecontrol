@@ -12,7 +12,7 @@ pub fn callback_stream_sink_info() -> (
     impl FnMut(ListResult<&SinkInfo<'_>>),
     Receiver<SinkInfo<'static>>,
 ) {
-    let (mut sender, recv) = channel(1024); // TODO channel size?
+    let (mut sender, recv) = channel(64); // TODO channel size?
     let cb = {
         move |c: ListResult<&SinkInfo<'_>>| {
             match c {
@@ -35,7 +35,7 @@ pub fn callback_stream_source_info() -> (
     impl FnMut(ListResult<&SourceInfo<'_>>),
     Receiver<SourceInfo<'static>>,
 ) {
-    let (mut sender, recv) = channel(1024); // TODO channel size?
+    let (mut sender, recv) = channel(64); // TODO channel size?
     let cb = {
         move |c: ListResult<&SourceInfo<'_>>| match c {
             ListResult::Item(it) => match sender.try_send(it.to_static()) {
@@ -56,7 +56,7 @@ pub fn callback_stream_sink_input_info() -> (
     impl FnMut(ListResult<&SinkInputInfo<'_>>),
     Receiver<SinkInputInfo<'static>>,
 ) {
-    let (mut sender, recv) = channel(1024); // TODO channel size?
+    let (mut sender, recv) = channel(64); // TODO channel size?
     let cb = {
         move |c: ListResult<&SinkInputInfo<'_>>| match c {
             ListResult::Item(it) => match sender.try_send(it.to_static()) {
@@ -77,7 +77,7 @@ pub fn callback_stream_source_output_info() -> (
     impl FnMut(ListResult<&SourceOutputInfo<'_>>),
     Receiver<SourceOutputInfo<'static>>,
 ) {
-    let (mut sender, recv) = channel(1024); // TODO channel size?
+    let (mut sender, recv) = channel(64); // TODO channel size?
     let cb = {
         move |c: ListResult<&SourceOutputInfo<'_>>| match c {
             ListResult::Item(it) => match sender.try_send(it.to_static()) {
